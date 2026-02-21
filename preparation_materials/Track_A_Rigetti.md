@@ -1,4 +1,4 @@
-# Track B: Energy Grid Optimization - Preparation Guide
+# Track A: Energy Grid Optimization - Preparation Guide
 
 **Sponsor:** Rigetti
 
