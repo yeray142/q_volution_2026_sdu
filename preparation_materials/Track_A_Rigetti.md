@@ -1,3 +1,7 @@
+# Track B: Energy Grid Optimization - Preparation Guide
+
+**Sponsor:** Rigetti
+
 ## Required Tools (Open Source) & Datasets
 
 **Python Libraries:** 
