@@ -57,7 +57,7 @@ We have partnered with leading quantum providers to design four technical tracks
 
 - [`/preparation-materials`](./preparation-materials): **Start Here.** Study guides and reading lists for the specific algorithms (QAOA, QML, ODEs).
 - `/challenges`:  Detailed PDF descriptions of each track. We're hoping to host these on Aqora!
-- `/datasets`: Links to the public datasets used in Track A and B. Agaib, on Aqora!
+- `/datasets`: Links to the public datasets used in Track A and B. Again, on Aqora!
 
 ## 🤝 Community & Support
 
