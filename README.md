@@ -1,7 +1,6 @@
 # Q-volution Hackathon 2026: Official Resources
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Open Source: Mandated](https://img.shields.io/badge/Open%20Source-Required%20for%20Prizes-brightgreen)](#open-source-mandate)
 [![Hosted By: Girls in Quantum](https://img.shields.io/badge/Org-Girls%20in%20Quantum-blueviolet)](https://girlsinquantum.com)
 
 **Event Dates:** February 23rd – March 1st, 2026  
@@ -11,7 +10,7 @@
 
 Welcome to the official open-source repository for the **Q-volution Hackathon 2026**.
 
-Girls in Quantum is a global, youth-led initiative dedicated to making quantum education accessible, especially for girls and young students. This repository hosts the technical documentation, challenge statements, starter code references, and open-source learning resources for our participants.
+Girls in Quantum is a global, youth-led initiative dedicated to making quantum education accessible, especially for girls and young students. This repository mainly hosts learning resources for our participants.
 
 Our mission is to bridge the gap between theory and practice. Participants will use **open-source SDKs** (PyQuil, MerLin, Qiskit) to solve real-world problems in energy, finance, and simulation.
 
