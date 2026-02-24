@@ -20,7 +20,7 @@
 To prepare for the advanced nature of this challenge, we have categorized the resources from foundational to cutting-edge research:
 
 ### 1. The Theory & Research Context (Advanced Approaches)
-*   **Research Paper:** ["Optimization via Quantum Preconditioning"](https://arxiv.org/abs/2502.18570) by Maxime Dupont, Tina Oberoi, and Bhuvanesh Sundar. *(Note: Search ArXiv for the title if the direct PDF link is not provided in your packet).*
+*   **Research Paper:** ["Optimization via Quantum Preconditioning"](https://arxiv.org/abs/2502.18570) by Maxime Dupont, Tina Oberoi, and Bhuvanesh Sundar.*
 *   **Blog Post:** ["New quantum algorithm boosts classical optimizers"](https://medium.com/rigetti/new-quantum-algorithm-boosts-classical-optimizers-e191e28d4aff) — A high-level overview of the concepts behind the research paper.
 
 ### 2. Rigetti Specific Tutorials (Hardware/Simulation)
