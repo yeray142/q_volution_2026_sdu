@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Hosted By: Girls in Quantum](https://img.shields.io/badge/Org-Girls%20in%20Quantum-blueviolet)](https://girlsinquantum.com)
 
-**Event Dates:** February 27th – March 1st, 2026  
+**Event Dates:** February 27th – March 3rd, 2026  
 
 ## 📖 About
 
