@@ -18,11 +18,13 @@ from torch.utils.data import DataLoader, TensorDataset
 
 warnings.filterwarnings('ignore')
 
+# =============================================================================
+# GPU: Detect device once, globally. Every model and tensor will use this.
+# =============================================================================
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # GPU
+print(f"Running on: {DEVICE}")                                          # GPU
 
-# =============================================================================
-# Configuration container defining all experiment hyperparameters and runtime
-# settings used throughout the full training and forecasting pipeline.
-# =============================================================================
+
 @dataclass
 class Config:
     lr: float = 0.001
@@ -34,26 +36,12 @@ class Config:
     n_predict: int = 6
 
 
-# =============================================================================
-# Directory creation and logging configuration to ensure all outputs such as
-# models, plots, and submission files are saved in a structured location.
-# =============================================================================
 SAVE_DIR = "swaptions_merlin_quantum"
 os.makedirs(SAVE_DIR, exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# DATA PIPELINE
-# This section is responsible for:
-# 1. Loading the dataset from HuggingFace.
-# 2. Sorting chronologically if needed.
-# 3. Selecting numeric features only.
-# 4. Scaling the data for model stability.
-# 5. Creating lag-based supervised learning sequences.
-# 6. Splitting into training and validation subsets.
-# =============================================================================
 def load_data(config):
     ds = load_dataset("Quandela/Challenge_Swaptions", split="train")
     df = pd.DataFrame(ds)
@@ -86,29 +74,24 @@ def load_data(config):
     )
 
 
-# =============================================================================
-# QUANTUM MODEL DEFINITION
-# This neural network follows a hybrid architecture:
-# - A classical encoder compresses high-dimensional lag features.
-# - A photonic variational quantum circuit layer performs nonlinear mapping.
-# - A classical decoder reconstructs predictions in original feature space.
-# =============================================================================
 class MerlinQuantumNet(nn.Module):
 
     def __init__(self, input_dim, output_dim, shots=5000):
         super().__init__()
 
-        # Classical feature compression block
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, 16),
             nn.Tanh(),
             nn.LayerNorm(16)
         )
 
-        # Quantum photonic processing layer
-        self.quantum = ML.QuantumLayer.simple(input_size=16, n_params=64)
+        # GPU: Pass device so the quantum layer's internal tensors live on GPU
+        self.quantum = ML.QuantumLayer.simple(
+            input_size=16,
+            n_params=64,
+            device=DEVICE          # GPU
+        )
 
-        # Classical reconstruction and regression head
         self.decoder = nn.Sequential(
             nn.Linear(self.quantum.output_size, 64),
             nn.ReLU(),
@@ -120,22 +103,10 @@ class MerlinQuantumNet(nn.Module):
 
     def forward(self, x):
         enc = self.encoder(x)
-
-        # Rescale tanh output from [-1, 1] to [0, 1] for quantum state encoding
         enc = (enc + 1) / 2
-
         return self.decoder(self.quantum(enc))
 
 
-# =============================================================================
-# TRAINING PROCEDURE
-# This function:
-# - Fits robust scalers for inputs and targets.
-# - Trains the hybrid quantum model using AdamW.
-# - Applies gradient clipping for stability.
-# - Evaluates on validation set.
-# - Returns trained model, scalers, and validation MSE.
-# =============================================================================
 def train_model(Xtr, ytr, Xte, yte, config, output_dim):
 
     sx = RobustScaler()
@@ -146,12 +117,18 @@ def train_model(Xtr, ytr, Xte, yte, config, output_dim):
     ytr_s = sy.fit_transform(ytr)
 
     dl = DataLoader(
-        TensorDataset(torch.FloatTensor(xtr_s), torch.FloatTensor(ytr_s)),
+        TensorDataset(
+            torch.FloatTensor(xtr_s),
+            torch.FloatTensor(ytr_s)
+        ),
         batch_size=config.batch_size,
-        shuffle=True
+        shuffle=True,
+        pin_memory=(DEVICE.type == 'cuda'),   # GPU: faster host→device transfer
+        num_workers=2                          # GPU: overlap data loading
     )
 
     model = MerlinQuantumNet(Xtr.shape[1], output_dim, shots=config.shots)
+    model = model.to(DEVICE)                  # GPU: move all model parameters
 
     opt = torch.optim.AdamW(
         model.parameters(),
@@ -164,33 +141,25 @@ def train_model(Xtr, ytr, Xte, yte, config, output_dim):
     model.train()
     for _ in tqdm(range(config.epochs), desc="Training", leave=False):
         for bx, by in dl:
+            bx = bx.to(DEVICE, non_blocking=True)   # GPU: move batch to device
+            by = by.to(DEVICE, non_blocking=True)   # GPU
+
             opt.zero_grad()
             loss = crit(model(bx), by)
             loss.backward()
-
-            # Clip gradients to avoid instability from exploding updates
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
             opt.step()
 
     model.eval()
     with torch.no_grad():
+        xte_tensor = torch.FloatTensor(xte_s).to(DEVICE)  # GPU
         pred = sy.inverse_transform(
-            model(torch.FloatTensor(xte_s)).numpy()
+            model(xte_tensor).cpu().numpy()               # GPU: .cpu() before numpy
         )
 
     return model, sx, sy, mean_squared_error(yte, pred)
 
 
-# =============================================================================
-# AUTOREGRESSIVE FUTURE FORECASTING
-# This function generates future rows sequentially by:
-# - Using the last known lag window as context.
-# - Predicting one step ahead.
-# - Feeding the prediction back into the rolling context.
-# - Repeating for n_predict steps.
-# - Averaging across ensemble members.
-# =============================================================================
 def predict_next_6(models_scalers, data_scaled, raw_scaler, config):
 
     lag = config.lag
@@ -199,7 +168,6 @@ def predict_next_6(models_scalers, data_scaled, raw_scaler, config):
     for model, sx, sy in models_scalers:
         model.eval()
 
-        # Initialize context with the final observed lag window
         ctx = list(data_scaled[-lag:])
         preds = []
 
@@ -209,34 +177,18 @@ def predict_next_6(models_scalers, data_scaled, raw_scaler, config):
                 x_in = np.array(ctx[-lag:]).flatten().reshape(1, -1)
                 x_in_s = sx.transform(x_in)
 
-                pred_s = model(torch.FloatTensor(x_in_s)).numpy()
+                x_tensor = torch.FloatTensor(x_in_s).to(DEVICE)          # GPU
+                pred_s = model(x_tensor).cpu().numpy()                    # GPU
                 pred_raw = sy.inverse_transform(pred_s)[0]
 
                 preds.append(pred_raw)
-
-                # Convert prediction back to scaled representation for next step
-                ctx.append(
-                    raw_scaler.transform(
-                        pred_raw.reshape(1, -1)
-                    )[0]
-                )
+                ctx.append(raw_scaler.transform(pred_raw.reshape(1, -1))[0])
 
         all_preds.append(np.array(preds))
 
-    # Ensemble averaging improves robustness and reduces variance
     return np.mean(all_preds, axis=0)
 
 
-# =============================================================================
-# MAIN EXECUTION ENTRY POINT
-# This section orchestrates:
-# - Data loading
-# - Ensemble training
-# - Baseline comparison
-# - Future prediction
-# - Visualization
-# - Full pipeline serialization
-# =============================================================================
 def main():
 
     config = Config()
@@ -250,7 +202,6 @@ def main():
 
     models_scalers, mses = [], []
 
-    # Train multiple models with different random seeds
     for i in range(config.n_ensemble):
         torch.manual_seed(i)
 
@@ -265,7 +216,6 @@ def main():
 
     print(f"\nEnsemble Val MSE : {np.mean(mses):.6f}")
 
-    # Classical regression baselines for performance comparison
     ridge_mse = mean_squared_error(
         yte,
         Ridge(alpha=1.0).fit(xtr, ytr).predict(xte)
@@ -294,17 +244,12 @@ def main():
     submission_df = pd.DataFrame(predicted_6, columns=num_cols)
     submission_df.index.name = "step"
 
-    submission_path = os.path.join(
-        SAVE_DIR,
-        "submission_6_rows.csv"
-    )
-
+    submission_path = os.path.join(SAVE_DIR, "submission_6_rows.csv")
     submission_df.to_csv(submission_path)
 
-    print(f"\n Submission saved : {submission_path}")
-    print(f"   Shape            : {predicted_6.shape}  (6 rows × {output_dim} features)")
+    print(f"\nSubmission saved : {submission_path}")
+    print(f"   Shape         : {predicted_6.shape}  (6 rows × {output_dim} features)")
 
-    # Visualization of last observed points and predicted extension
     n_show = 50
     n_cols_plot = min(6, output_dim)
 
@@ -313,52 +258,32 @@ def main():
 
     for idx in range(n_cols_plot):
         ax = axes[idx]
-
-        ax.plot(
-            np.arange(n_show),
-            df_num[-n_show:, idx],
-            'steelblue',
-            linewidth=2,
-            label='Known data'
-        )
-
-        ax.plot(
-            np.arange(n_show, n_show + 6),
-            predicted_6[:, idx],
-            'darkorange',
-            linewidth=2,
-            marker='o',
-            linestyle='--',
-            label='Predicted (6 rows)'
-        )
-
+        ax.plot(np.arange(n_show), df_num[-n_show:, idx],
+                'steelblue', linewidth=2, label='Known data')
+        ax.plot(np.arange(n_show, n_show + 6), predicted_6[:, idx],
+                'darkorange', linewidth=2, marker='o', linestyle='--',
+                label='Predicted (6 rows)')
         ax.axvline(n_show - 1, color='gray', linestyle=':', alpha=0.6)
-
         ax.set_title(f'{num_cols[idx]}', fontsize=9)
         ax.legend(fontsize=7)
         ax.grid(True, alpha=0.3)
 
-    plt.suptitle(
-        'Swaption Forecast: Next 6 Hidden Rows',
-        fontsize=13,
-        fontweight='bold'
-    )
-
+    plt.suptitle('Swaption Forecast: Next 6 Hidden Rows',
+                 fontsize=13, fontweight='bold')
     plt.tight_layout()
 
-    plot_path = os.path.join(
-        SAVE_DIR,
-        "quantum_swaptions_6rows.png"
-    )
-
+    plot_path = os.path.join(SAVE_DIR, "quantum_swaptions_6rows.png")
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f" Plot saved: {plot_path}")
+    print(f"Plot saved: {plot_path}")
 
-    # Persist full training artifact for reproducibility
+    # GPU: collect state dicts back on CPU before saving
     torch.save({
-        'models_state_dicts': [m.state_dict() for m, _, _ in models_scalers],
+        'models_state_dicts': [
+            {k: v.cpu() for k, v in m.state_dict().items()}   # GPU
+            for m, _, _ in models_scalers
+        ],
         'config': vars(config),
         'num_cols': num_cols,
         'output_dim': output_dim,
